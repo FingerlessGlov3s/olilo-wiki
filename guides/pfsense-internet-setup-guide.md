@@ -1,35 +1,33 @@
 ---
 title: pfSense Setup Guide
-description: Guide on how to set up pfSense for use with Olilo over an Openreach ONT
+description: Guide on how to set up pfSense for use with Olilo over Openreach, CityFibre, or Freedom Fibre
 category: Setup
-author: Ed Nevard
-lastUpdated: 07/05/2026
+author: Ed Nevard, Aydan Abrahams
+lastUpdated: 12/07/2026
 ---
 
 # Introduction
 
-This guide explains how to configure **pfSense** for use with **Olilo on Openreach FTTP**, using an Openreach ONT.
+This guide explains how to configure **pfSense** for use with **Olilo**, covering **Openreach FTTP** (PPPoE), **CityFibre** (DHCP + VLAN 911), and **Freedom Fibre** (plain DHCP).
+
+Check [Which Network Am I On?](./which-network-am-i-on) first, the WAN configuration differs by network.
 
 It assumes:
 
-- You already have an Openreach ONT installed.
-- You have received your PPPoE username and password from Olilo.
 - You can access the pfSense web interface.
-- Your pfSense WAN port is connected directly to the Openreach ONT.
+- Your pfSense WAN port is connected directly to your ONT.
+- If you're on Openreach, you have received your PPPoE username and password from Olilo. CityFibre and Freedom Fibre don't need credentials, they use DHCP.
 
 The examples below are based on **pfSense 2.8.1-RELEASE**, but the general process should be similar on nearby versions.
 
 > **Note:** All IPv6 addresses in this guide use documentation/example prefixes such as `2001:db8::/32`. Replace these with the routed prefix supplied by Olilo. Do not publish your real WAN IPv6 address or customer prefix unless you are happy for it to be public.
 
-
 ---
 
 # Physical Setup
 
-Connect your Openreach ONT to your pfSense WAN interface:
-
 ```text
-Openreach ONT → pfSense WAN
+Openreach / CityFibre / Freedom Fibre ONT → pfSense WAN
 pfSense LAN → switch / access point / internal network
 ```
 
@@ -37,13 +35,15 @@ pfSense LAN → switch / access point / internal network
 
 # WAN Setup
 
+## Openreach (PPPoE)
+
 Go to:
 
 ```text
 Interfaces → WAN
 ```
 
-## IPv4 Configuration
+### IPv4 Configuration
 
 Set:
 
@@ -60,7 +60,7 @@ Password: your Olilo PPPoE password
 
 The username and password are usually supplied by email.
 
-## IPv6 Configuration
+### IPv6 Configuration
 
 Set:
 
@@ -78,9 +78,7 @@ This allows IPv6 to work correctly over the PPPoE session.
 
 Save and apply the changes.
 
----
-
-# PPPoE Driver Note
+### PPPoE Driver Note
 
 pfSense includes an option under:
 
@@ -100,6 +98,63 @@ On some systems this may improve performance, especially at higher speeds, but i
 
 For a typical Openreach 220/30 or 1000/115 service, the default PPPoE client is usually fine on reasonable hardware.
 
+## CityFibre (DHCP + VLAN 911)
+
+CityFibre requires your WAN traffic tagged with **VLAN 911**, untagged traffic won't get an address at all.
+
+### 1. Create the VLAN
+
+Go to:
+
+```text
+Interfaces → Assignments → VLANs
+```
+
+Press **+** and set:
+
+```text
+Parent Interface: your WAN NIC
+VLAN Tag:          911
+Description:       Olilo CityFibre
+```
+
+**Save**
+
+### 2. Assign it and set it to DHCP
+
+Go to **Interfaces → Assignments**, assign the new VLAN interface, then edit it:
+
+```text
+Enable interface:        Tick
+IPv4 Configuration Type: DHCP
+IPv6 Configuration Type: DHCPv6
+
+DHCPv6 client configuration
+Send IPv6 prefix hint: 48
+```
+
+**Save** and **Apply Changes**.
+
+## Freedom Fibre (DHCP)
+
+No VLAN tag needed. Go to:
+
+```text
+Interfaces → WAN
+```
+
+Set:
+
+```text
+IPv4 Configuration Type: DHCP
+IPv6 Configuration Type: DHCPv6
+
+DHCPv6 client configuration
+Send IPv6 prefix hint: 48
+```
+
+**Save** and **Apply Changes**.
+
 ---
 
 # Confirm WAN Connectivity
@@ -110,19 +165,14 @@ After applying the WAN settings, go to:
 Status → Interfaces
 ```
 
-You should see:
-
-- A public IPv4 address, or your routed/static IPv4 configuration.
-- A global IPv6 address on WAN.
-
-For Openreach/Olilo IPv6, the WAN address may look different from your routed LAN prefix. For example:
+You should see a public IPv4 address (or your routed/static IPv4 configuration) and a global IPv6 address on WAN. For example, on Openreach:
 
 ```text
 WAN IPv6: 2001:db8:feed:1234:....
 Routed /48: 2001:db8:1234::/48
 ```
 
-Do not assume the WAN prefix is the same as your routed customer prefix. If unsure, ask Olilo to confirm your routed IPv6 block.
+Do not assume the WAN IPv6 address is the same as your routed customer `/48` prefix. If unsure, ask Olilo to confirm your routed IPv6 block.
 
 ---
 
@@ -170,6 +220,8 @@ For additional VLANs, use a different fourth hextet, for example:
 IoT VLAN:   2001:db8:1234:2::1/64
 Guest VLAN: 2001:db8:1234:3::1/64
 ```
+
+This applies the same regardless of which network you're on, CityFibre and Freedom Fibre use the same LAN IPv6 addressing pattern as Openreach.
 
 ---
 
@@ -284,7 +336,7 @@ Echo Reply may also be allowed if desired.
 
 ---
 
-# MSS Clamping for Openreach PPPoE
+# MSS Clamping (Openreach PPPoE only)
 
 Openreach PPPoE uses an effective MTU of 1492.
 
@@ -329,6 +381,8 @@ Management
 ```
 
 Do not change WAN MTU unless Olilo specifically advises you to.
+
+This isn't needed on CityFibre or Freedom Fibre, which don't use PPPoE and run the standard 1500 MTU.
 
 ---
 
@@ -489,7 +543,7 @@ https://test-ipv6.com
 
 # Troubleshooting
 
-## PPPoE does not connect
+## PPPoE does not connect (Openreach)
 
 Check:
 
@@ -501,6 +555,14 @@ Check:
 ```text
 Status → System Logs → PPP
 ```
+
+## WAN doesn't get an IPv4 address (CityFibre)
+
+Almost always a missing or wrong VLAN tag. Confirm the VLAN is tagged **911** and assigned as the actual WAN interface, not left unassigned.
+
+## WAN doesn't get an IPv4 address (Freedom Fibre)
+
+Check the ONT is showing a healthy fibre/service light, and that the WAN cable runs directly into pfSense's WAN port without an intermediate unmanaged switch dropping the link.
 
 ## IPv6 works on pfSense but not on LAN clients
 
@@ -535,7 +597,7 @@ Check:
 
 Check:
 
-- The device’s VLAN also has MSS clamp set to `1432`.
+- The device's VLAN also has MSS clamp set to `1432` (Openreach only).
 - Upload limiter is not accidentally shaping download too aggressively.
 - If using limiters, use a dummy/no-op download queue unless download bufferbloat is actually a problem.
 
@@ -570,9 +632,11 @@ LAN IPv6: Static /64 from routed /48
 Router Advertisements: Unmanaged
 MSS clamp: 1432 on all client-facing LAN/VLAN rules
 WAN ICMPv6: allow essential types to routed /48
-Upload shaping: optional, FQ-CoDel limiter around 90–95% of upload
+Upload shaping: optional, FQ-CoDel limiter around 90-95% of upload
 Download shaping: usually not needed
 ```
+
+For CityFibre and Freedom Fibre, the WAN section differs (DHCP/DHCPv6, VLAN 911 on CityFibre only) and MSS clamping isn't required, everything else above is unchanged.
 
 ---
 
@@ -595,11 +659,17 @@ Before asking for help, gather:
 1. Screenshot of `Status → Interfaces`.
 2. Screenshot of WAN and LAN interface settings.
 3. Your routed IPv6 prefix, if known.
-4. Output of IPv4 and IPv6 ping tests.
-5. PPP logs if PPPoE is not connecting.
+4. Which network you're on, Openreach, CityFibre, or Freedom Fibre.
+5. Output of IPv4 and IPv6 ping tests.
+6. PPP logs if PPPoE is not connecting.
 
 Then ask in the Olilo Discord:
 
 ```text
 Discord: discord.gg/olilo
 ```
+
+## Related guides
+
+- Which Network Am I On?
+- IPv6 Not Working? Troubleshooting
